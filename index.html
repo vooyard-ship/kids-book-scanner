@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>책장 스캐너</title>
+<style>
+:root { --bg:#111513; --ink:#f1f4f2; --muted:#9aa69f; --accent:#f07ca4; --ok:#5fd18a; --line:#2a322d; }
+* { box-sizing:border-box; }
+html,body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo",system-ui,sans-serif; }
+body { padding:max(12px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); }
+.wrap { max-width:520px; margin:0 auto; display:flex; flex-direction:column; gap:14px; }
+h1 { font-size:20px; margin:4px 0 0; }
+.cam { position:relative; width:100%; aspect-ratio:3/4; background:#000; border-radius:16px; overflow:hidden; }
+video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.shade { position:absolute; inset:0; pointer-events:none;
+  background:
+    linear-gradient(#0009,#0009) top/100% 32% no-repeat,
+    linear-gradient(#0009,#0009) bottom/100% 32% no-repeat,
+    linear-gradient(#0009,#0009) left center/8% 36% no-repeat,
+    linear-gradient(#0009,#0009) right center/8% 36% no-repeat; }
+.frame { position:absolute; left:8%; right:8%; top:32%; bottom:32%; border:3px solid #fff; border-radius:12px; pointer-events:none; transition:border-color .15s; }
+.frame.hit { border-color:var(--ok); }
+.scanline { position:absolute; left:4%; right:4%; top:50%; height:2px; background:#ff3b3b; box-shadow:0 0 10px #ff3b3b; animation:sweep 1.6s ease-in-out infinite alternate; }
+@keyframes sweep { from { top:12%; } to { top:88%; } }
+@media (prefers-reduced-motion:reduce) { .scanline { animation:none; } }
+.start { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+button { font:inherit; border:0; border-radius:12px; padding:14px 18px; cursor:pointer; }
+.primary { background:var(--accent); color:#fff; font-size:18px; font-weight:600; }
+.send { background:var(--ink); color:var(--bg); font-size:17px; font-weight:600; width:100%; }
+.send:disabled { opacity:.4; }
+.ghost { background:none; color:var(--muted); border:1px solid var(--line); padding:8px 12px; font-size:14px; }
+.msg { min-height:24px; font-size:15px; }
+.msg.ok { color:var(--ok); } .msg.warn { color:#f0b860; }
+ul { list-style:none; margin:0; padding:0; border:1px solid var(--line); border-radius:12px; max-height:30vh; overflow:auto; }
+li { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; border-top:1px solid var(--line); font-variant-numeric:tabular-nums; }
+li:first-child { border-top:0; }
+li button { padding:4px 8px; font-size:13px; }
+.row { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+.count { color:var(--muted); font-size:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📚 찬이빈이 책장 스캐너</h1>
+  <div class="cam">
+    <video id="v" playsinline muted></video>
+    <div class="shade"></div>
+    <div class="frame" id="frame"><div class="scanline"></div></div>
+    <div class="start" id="startBox"><button class="primary" id="start" type="button">카메라 켜기</button></div>
+  </div>
+  <div class="msg" id="msg">바코드를 하얀 틀 안에 가로로 맞춰 주세요.</div>
+  <div class="row"><span class="count" id="count">찍은 책 0권</span><button class="ghost" id="clear" type="button">목록 비우기</button></div>
+  <ul id="list"></ul>
+  <button class="send" id="send" type="button" disabled>책장으로 보내기</button>
+</div>
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+(function(){
+  const SHELF = "https://claude.ai/artifact/UqesUb5MfFPa4u2awqtFVK";
+  const $ = (id) => document.getElementById(id);
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem("kbs_list") || "[]"); } catch (e) {}
+  const save = () => { try { localStorage.setItem("kbs_list", JSON.stringify(list)); } catch (e) {} };
+
+  let ac = null;
+  function unlock(){ try { if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)(); if(ac.state==="suspended") ac.resume(); } catch(e){} }
+  function tone(f,s,d){ const o=ac.createOscillator(), g=ac.createGain(); o.type="square"; o.frequency.value=f; const t=ac.currentTime+s;
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.2,t+0.01); g.gain.setValueAtTime(0.2,t+d-0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+d);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t+d+0.02); }
+  function beep(kind){ try { if(!ac) return; if(kind==="ok") tone(2200,0,0.12); else { tone(1200,0,0.08); tone(1200,0.13,0.08); } } catch(e){} }
+
+  function valid(s){ if(!/^97[89]\d{10}$/.test(s)) return false; let sum=0; for(let i=0;i<12;i++) sum+=(+s[i])*(i%2?3:1); return (10-(sum%10))%10===+s[12]; }
+  function say(t,k){ const m=$("msg"); m.textContent=t; m.className="msg "+(k||""); }
+  function render(){
+    $("count").textContent = "찍은 책 " + list.length + "권";
+    $("send").disabled = !list.length;
+    $("send").textContent = list.length ? "책장으로 보내기 (" + list.length + "권)" : "책장으로 보내기";
+    const ul=$("list"); ul.textContent="";
+    list.slice().reverse().forEach((isbn)=>{ const li=document.createElement("li"); li.textContent=isbn;
+      const x=document.createElement("button"); x.className="ghost"; x.type="button"; x.textContent="빼기";
+      x.onclick=()=>{ list=list.filter((v)=>v!==isbn); save(); render(); }; li.appendChild(x); ul.appendChild(li); });
+  }
+
+  let last="", lastAt=0;
+  function onCode(text){
+    const s=String(text||"").replace(/\D/g,"");
+    const now=Date.now();
+    if(s===last && now-lastAt<2500) return;
+    last=s; lastAt=now;
+    if(!valid(s)) return;
+    const f=$("frame"); f.classList.add("hit"); setTimeout(()=>f.classList.remove("hit"),400);
+    if(list.includes(s)){ beep("dup"); say("이미 찍은 책이에요 · "+s,"warn"); return; }
+    list.push(s); save(); render(); beep("ok");
+    say("삑! " + s + " · 다음 책을 비춰 주세요","ok");
+  }
+
+  $("start").addEventListener("click", async ()=>{
+    unlock();
+    if(!window.ZXing){ say("스캐너를 불러오지 못했어요. 새로고침해 주세요.","warn"); return; }
+    const Z=window.ZXing, hints=new Map();
+    hints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13]);
+    hints.set(Z.DecodeHintType.TRY_HARDER,true);
+    const reader=new Z.BrowserMultiFormatReader(hints, 300);
+    try {
+      await reader.decodeFromConstraints({ audio:false, video:{ facingMode:{ ideal:"environment" }, width:{ ideal:1280 }, height:{ ideal:720 } } }, $("v"), (res)=>{ if(res) onCode(res.getText()); });
+      $("startBox").hidden=true; say("바코드를 하얀 틀 안에 가로로 맞춰 주세요.");
+    } catch(e){
+      say("카메라를 켤 수 없어요("+(e && e.name || "오류")+"). Safari 주소창 왼쪽 「가가」→ 웹 사이트 설정 → 카메라 「허용」으로 바꿔 주세요.","warn");
+    }
+  });
+  $("clear").addEventListener("click", ()=>{ if($("clear").dataset.armed){ list=[]; save(); render(); delete $("clear").dataset.armed; $("clear").textContent="목록 비우기"; return; }
+    $("clear").dataset.armed="1"; $("clear").textContent="한 번 더 누르면 비워요"; setTimeout(()=>{ delete $("clear").dataset.armed; $("clear").textContent="목록 비우기"; },3000); });
+  $("send").addEventListener("click", ()=>{
+    if(!list.length) return;
+    const url = SHELF + "#" + list.join("-");
+    say("책장을 여는 중… 책장에 다 들어간 걸 확인한 뒤 「목록 비우기」를 눌러 주세요.","ok");
+    location.href = url;
+  });
+  render();
+})();
+</script>
+</body>
+</html>
