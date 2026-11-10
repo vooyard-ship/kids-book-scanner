@@ -8,6 +8,7 @@
 <style>
 :root { --bg:#111513; --ink:#f1f4f2; --muted:#9aa69f; --accent:#f07ca4; --ok:#5fd18a; --line:#2a322d; }
 * { box-sizing:border-box; }
+[hidden] { display:none !important; }
 html,body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo",system-ui,sans-serif; }
 body { padding:max(12px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); }
 .wrap { max-width:520px; margin:0 auto; display:flex; flex-direction:column; gap:14px; }
@@ -70,7 +71,7 @@ function tone(f,s,d){ const o=ac.createOscillator(), g=ac.createGain(); o.type="
   o.connect(g).connect(ac.destination); o.start(t); o.stop(t+d+0.02); }
 function beep(kind){ try { if(!ac) return; if(kind==="ok") tone(2200,0,0.12); else { tone(1200,0,0.08); tone(1200,0.13,0.08); } } catch(e){} }
 
-function valid(s){ if(!/^97[89]\d{10}$/.test(s)) return false; let sum=0; for(let i=0;i<12;i++) sum+=(+s[i])*(i%2?3:1); return (10-(sum%10))%10===+s[12]; }
+function valid(s){ if(!/^\d{13}$/.test(s)) return false; let sum=0; for(let i=0;i<12;i++) sum+=(+s[i])*(i%2?3:1); return (10-(sum%10))%10===+s[12]; }
 function say(t,k){ const m=$("msg"); m.textContent=t; m.className="msg "+(k||""); }
 function render(){
   $("count").textContent = "찍은 책 " + list.length + "권";
@@ -129,12 +130,13 @@ $("start").addEventListener("click", async ()=>{
   } catch(e) {
     say("카메라를 켤 수 없어요(" + (e && e.name || "오류") + "). 설정 → 앱 → Safari → 카메라 「허용」, 또는 주소창 「가가」→ 웹 사이트 설정 → 카메라 「허용」.","warn"); return;
   }
+  try { const tr = stream.getVideoTracks()[0]; const cap = tr.getCapabilities ? tr.getCapabilities() : {}; if (cap.focusMode && cap.focusMode.includes("continuous")) await tr.applyConstraints({ advanced:[{ focusMode:"continuous" }] }); } catch(e) {}
   v.setAttribute("playsinline",""); v.muted = true; v.srcObject = stream;
   try { await v.play(); } catch(e) {}
   $("startBox").hidden = true;
   say("인식 준비 중… (처음 한 번 몇 초 걸려요)");
   try { await readBarcodes(new ImageData(8,8), { formats:["EAN13"] }); } catch(e) {}
-  say("바코드를 하얀 틀 안에 가로로 맞춰 주세요.");
+  say("바코드를 하얀 틀 안에 가로로 맞춰 주세요. 15~20cm 떨어져야 초점이 맞아요.");
   running = true; tick();
 });
 $("clear").addEventListener("click", ()=>{ if($("clear").dataset.armed){ list=[]; save(); render(); delete $("clear").dataset.armed; $("clear").textContent="목록 비우기"; return; }
