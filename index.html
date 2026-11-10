@@ -55,71 +55,96 @@ li button { padding:4px 8px; font-size:13px; }
   <ul id="list"></ul>
   <button class="send" id="send" type="button" disabled>책장으로 보내기</button>
 </div>
-<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script>
-(function(){
-  const SHELF = "https://claude.ai/artifact/UqesUb5MfFPa4u2awqtFVK";
-  const $ = (id) => document.getElementById(id);
-  let list = [];
-  try { list = JSON.parse(localStorage.getItem("kbs_list") || "[]"); } catch (e) {}
-  const save = () => { try { localStorage.setItem("kbs_list", JSON.stringify(list)); } catch (e) {} };
+<script type="module">
+import { readBarcodes } from "https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.5/dist/es/reader/index.js";
+const SHELF = "https://claude.ai/artifact/UqesUb5MfFPa4u2awqtFVK";
+const $ = (id) => document.getElementById(id);
+let list = [];
+try { list = JSON.parse(localStorage.getItem("kbs_list") || "[]"); } catch (e) {}
+const save = () => { try { localStorage.setItem("kbs_list", JSON.stringify(list)); } catch (e) {} };
 
-  let ac = null;
-  function unlock(){ try { if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)(); if(ac.state==="suspended") ac.resume(); } catch(e){} }
-  function tone(f,s,d){ const o=ac.createOscillator(), g=ac.createGain(); o.type="square"; o.frequency.value=f; const t=ac.currentTime+s;
-    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.2,t+0.01); g.gain.setValueAtTime(0.2,t+d-0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+d);
-    o.connect(g).connect(ac.destination); o.start(t); o.stop(t+d+0.02); }
-  function beep(kind){ try { if(!ac) return; if(kind==="ok") tone(2200,0,0.12); else { tone(1200,0,0.08); tone(1200,0.13,0.08); } } catch(e){} }
+let ac = null;
+function unlock(){ try { if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)(); if(ac.state==="suspended") ac.resume(); } catch(e){} }
+function tone(f,s,d){ const o=ac.createOscillator(), g=ac.createGain(); o.type="square"; o.frequency.value=f; const t=ac.currentTime+s;
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.2,t+0.01); g.gain.setValueAtTime(0.2,t+d-0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+d);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t+d+0.02); }
+function beep(kind){ try { if(!ac) return; if(kind==="ok") tone(2200,0,0.12); else { tone(1200,0,0.08); tone(1200,0.13,0.08); } } catch(e){} }
 
-  function valid(s){ if(!/^97[89]\d{10}$/.test(s)) return false; let sum=0; for(let i=0;i<12;i++) sum+=(+s[i])*(i%2?3:1); return (10-(sum%10))%10===+s[12]; }
-  function say(t,k){ const m=$("msg"); m.textContent=t; m.className="msg "+(k||""); }
-  function render(){
-    $("count").textContent = "찍은 책 " + list.length + "권";
-    $("send").disabled = !list.length;
-    $("send").textContent = list.length ? "책장으로 보내기 (" + list.length + "권)" : "책장으로 보내기";
-    const ul=$("list"); ul.textContent="";
-    list.slice().reverse().forEach((isbn)=>{ const li=document.createElement("li"); li.textContent=isbn;
-      const x=document.createElement("button"); x.className="ghost"; x.type="button"; x.textContent="빼기";
-      x.onclick=()=>{ list=list.filter((v)=>v!==isbn); save(); render(); }; li.appendChild(x); ul.appendChild(li); });
-  }
+function valid(s){ if(!/^97[89]\d{10}$/.test(s)) return false; let sum=0; for(let i=0;i<12;i++) sum+=(+s[i])*(i%2?3:1); return (10-(sum%10))%10===+s[12]; }
+function say(t,k){ const m=$("msg"); m.textContent=t; m.className="msg "+(k||""); }
+function render(){
+  $("count").textContent = "찍은 책 " + list.length + "권";
+  $("send").disabled = !list.length;
+  $("send").textContent = list.length ? "책장으로 보내기 (" + list.length + "권)" : "책장으로 보내기";
+  const ul=$("list"); ul.textContent="";
+  list.slice().reverse().forEach((isbn)=>{ const li=document.createElement("li"); li.textContent=isbn;
+    const x=document.createElement("button"); x.className="ghost"; x.type="button"; x.textContent="빼기";
+    x.onclick=()=>{ list=list.filter((v)=>v!==isbn); save(); render(); }; li.appendChild(x); ul.appendChild(li); });
+}
 
-  let last="", lastAt=0;
-  function onCode(text){
-    const s=String(text||"").replace(/\D/g,"");
-    const now=Date.now();
-    if(s===last && now-lastAt<2500) return;
-    last=s; lastAt=now;
-    if(!valid(s)) return;
-    const f=$("frame"); f.classList.add("hit"); setTimeout(()=>f.classList.remove("hit"),400);
-    if(list.includes(s)){ beep("dup"); say("이미 찍은 책이에요 · "+s,"warn"); return; }
-    list.push(s); save(); render(); beep("ok");
-    say("삑! " + s + " · 다음 책을 비춰 주세요","ok");
-  }
+let last="", lastAt=0;
+function onCode(text){
+  const s=String(text||"").replace(/\D/g,"");
+  const now=Date.now();
+  if(s===last && now-lastAt<2500) return;
+  last=s; lastAt=now;
+  if(!valid(s)) return;
+  const f=$("frame"); f.classList.add("hit"); setTimeout(()=>f.classList.remove("hit"),400);
+  if(list.includes(s)){ beep("dup"); say("이미 찍은 책이에요 · "+s,"warn"); return; }
+  list.push(s); save(); render(); beep("ok");
+  say("삑! " + s + " · 다음 책을 비춰 주세요","ok");
+}
 
-  $("start").addEventListener("click", async ()=>{
-    unlock();
-    if(!window.ZXing){ say("스캐너를 불러오지 못했어요. 새로고침해 주세요.","warn"); return; }
-    const Z=window.ZXing, hints=new Map();
-    hints.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13]);
-    hints.set(Z.DecodeHintType.TRY_HARDER,true);
-    const reader=new Z.BrowserMultiFormatReader(hints, 300);
+const v = $("v");
+const cv = document.createElement("canvas");
+const ctx = cv.getContext("2d", { willReadFrequently: true });
+let busy = false, running = false;
+async function tick(){
+  if(!running) return;
+  if(!busy && v.readyState >= 2 && v.videoWidth){
+    busy = true;
     try {
-      await reader.decodeFromConstraints({ audio:false, video:{ facingMode:{ ideal:"environment" }, width:{ ideal:1280 }, height:{ ideal:720 } } }, $("v"), (res)=>{ if(res) onCode(res.getText()); });
-      $("startBox").hidden=true; say("바코드를 하얀 틀 안에 가로로 맞춰 주세요.");
-    } catch(e){
-      say("카메라를 켤 수 없어요("+(e && e.name || "오류")+"). Safari 주소창 왼쪽 「가가」→ 웹 사이트 설정 → 카메라 「허용」으로 바꿔 주세요.","warn");
-    }
-  });
-  $("clear").addEventListener("click", ()=>{ if($("clear").dataset.armed){ list=[]; save(); render(); delete $("clear").dataset.armed; $("clear").textContent="목록 비우기"; return; }
-    $("clear").dataset.armed="1"; $("clear").textContent="한 번 더 누르면 비워요"; setTimeout(()=>{ delete $("clear").dataset.armed; $("clear").textContent="목록 비우기"; },3000); });
-  $("send").addEventListener("click", ()=>{
-    if(!list.length) return;
-    const url = SHELF + "#" + list.join("-");
-    say("책장을 여는 중… 책장에 다 들어간 걸 확인한 뒤 「목록 비우기」를 눌러 주세요.","ok");
-    location.href = url;
-  });
-  render();
-})();
+      const vw=v.videoWidth, vh=v.videoHeight;
+      const cw=Math.round(vw*0.9), ch=Math.round(vh*0.45);
+      const sx=Math.round((vw-cw)/2), sy=Math.round((vh-ch)/2);
+      const scale = Math.min(1, 1000/cw);
+      cv.width=Math.round(cw*scale); cv.height=Math.round(ch*scale);
+      ctx.drawImage(v, sx, sy, cw, ch, 0, 0, cv.width, cv.height);
+      const img = ctx.getImageData(0,0,cv.width,cv.height);
+      const res = await readBarcodes(img, { formats:["EAN13"], tryHarder:true, maxNumberOfSymbols:1 });
+      if(res && res[0] && res[0].isValid) onCode(res[0].text);
+    } catch(e) { say("인식 엔진 오류: " + (e && e.message || e), "warn"); }
+    busy = false;
+  }
+  setTimeout(tick, 200);
+}
+
+$("start").addEventListener("click", async ()=>{
+  unlock();
+  say("카메라 요청 중…");
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ say("이 브라우저는 카메라를 쓸 수 없어요. Safari로 열어 주세요.","warn"); return; }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio:false, video:{ facingMode:{ ideal:"environment" }, width:{ ideal:1920 }, height:{ ideal:1080 } } });
+  } catch(e) {
+    say("카메라를 켤 수 없어요(" + (e && e.name || "오류") + "). 설정 → 앱 → Safari → 카메라 「허용」, 또는 주소창 「가가」→ 웹 사이트 설정 → 카메라 「허용」.","warn"); return;
+  }
+  v.setAttribute("playsinline",""); v.muted = true; v.srcObject = stream;
+  try { await v.play(); } catch(e) {}
+  $("startBox").hidden = true;
+  say("인식 준비 중… (처음 한 번 몇 초 걸려요)");
+  try { await readBarcodes(new ImageData(8,8), { formats:["EAN13"] }); } catch(e) {}
+  say("바코드를 하얀 틀 안에 가로로 맞춰 주세요.");
+  running = true; tick();
+});
+$("clear").addEventListener("click", ()=>{ if($("clear").dataset.armed){ list=[]; save(); render(); delete $("clear").dataset.armed; $("clear").textContent="목록 비우기"; return; }
+  $("clear").dataset.armed="1"; $("clear").textContent="한 번 더 누르면 비워요"; setTimeout(()=>{ delete $("clear").dataset.armed; $("clear").textContent="목록 비우기"; },3000); });
+$("send").addEventListener("click", ()=>{
+  if(!list.length) return;
+  say("책장을 여는 중… 책장에 다 들어간 걸 확인한 뒤 「목록 비우기」를 눌러 주세요.","ok");
+  location.href = SHELF + "#" + list.join("-");
+});
+render();
 </script>
 </body>
 </html>
